@@ -295,6 +295,13 @@ try:
 except ImportError:
     USE_PLOTLY = False
 
+if USE_PLOTLY:
+    PLOTLY_CONFIG = {
+        "displayModeBar": True,
+        "displaylogo": False,
+        "scrollZoom": False,
+        "doubleClick": "reset"
+    }
 
 def _fig_line(dates, series: dict, height: int = 260):
     if not USE_PLOTLY:
@@ -309,13 +316,15 @@ def _fig_line(dates, series: dict, height: int = 260):
         plot_bgcolor="#ffffff",
         paper_bgcolor="#ffffff",
         font=dict(color="#111"),
+        dragmode="pan",
     )
     fig.update_xaxes(
         showgrid=True,
         gridcolor="rgba(0,0,0,0.08)",
         tickformat="%m/%d",
         tickfont=dict(color="#444", size=12),
-        title_font=dict(color="#444")
+        title_font=dict(color="#444"),
+        fixedrange=True,
     )
     fig.update_yaxes(
         showgrid=True,
@@ -323,6 +332,7 @@ def _fig_line(dates, series: dict, height: int = 260):
         tickfont=dict(color="#444", size=12),
         title_font=dict(color="#444")
     )
+    fig.update_yaxes(fixedrange=True)
     return fig
 
 
@@ -338,15 +348,18 @@ def _fig_bar(dates, y, height: int = 260, y_dtick: float | None = None, y_range:
         plot_bgcolor="#ffffff",
         paper_bgcolor="#ffffff",
         font=dict(color="#111"),
+        dragmode="pan",
     )
     fig.update_xaxes(
         showgrid=True,
         gridcolor="rgba(0,0,0,0.08)",
         tickformat="%m/%d",
         tickfont=dict(color="#444", size=12),
-        title_font=dict(color="#444")
+        title_font=dict(color="#444"),
+        fixedrange=True,
     )
-    y_kwargs = dict(showgrid=True, gridcolor="rgba(0,0,0,0.08)")
+    y_kwargs = dict(showgrid=True, gridcolor="rgba(0,0,0,0.08)", fixedrange=True)
+
     if y_dtick is not None:
         y_kwargs["dtick"] = y_dtick
         y_kwargs["tick0"] = 0
@@ -372,7 +385,7 @@ fig_temp = _fig_line(
     },
 )
 if USE_PLOTLY:
-    st.plotly_chart(fig_temp, use_container_width=True, config={"displayModeBar": False})
+    st.plotly_chart(fig_temp, use_container_width=True, config=PLOTLY_CONFIG)
 else:
     st.line_chart(daily_all.set_index(x_all)[["気温（最高）", "気温（最低）"]])
 st.markdown('</div>', unsafe_allow_html=True)
@@ -385,7 +398,7 @@ _sun_max = float(pd.to_numeric(daily_all[_sun_col], errors="coerce").max()) if _
 _sun_top = (int((_sun_max + 3.999) // 4) * 4) if _sun_max > 0 else 16
 fig_sun = _fig_bar(x_all, daily_all[_sun_col], y_dtick=4, y_range=(0, max(4, _sun_top)))
 if USE_PLOTLY:
-    st.plotly_chart(fig_sun, use_container_width=True, config={"displayModeBar": False})
+    st.plotly_chart(fig_sun, use_container_width=True, config=PLOTLY_CONFIG)
 else:
     # フォールバック（軸の細かい調整は不可）
     st.bar_chart(daily_all.set_index(x_all)[_sun_col]) 
@@ -397,7 +410,7 @@ st.markdown('<div class="card"><div class="card-title">降水量（mm/日）</di
 _rain_col = "降水量（日計)" if "降水量（日計)" in daily_all.columns else ("降水量（日計）" if "降水量（日計）" in daily_all.columns else "降水量（平均）")
 fig_rain = _fig_bar(x_all, daily_all[_rain_col])
 if USE_PLOTLY:
-    st.plotly_chart(fig_rain, use_container_width=True, config={"displayModeBar": False})
+    st.plotly_chart(fig_rain, use_container_width=True, config=PLOTLY_CONFIG)
 else:
     st.bar_chart(daily_all.set_index(x_all)[_rain_col]) 
 st.markdown('</div>', unsafe_allow_html=True)
@@ -432,7 +445,7 @@ if USE_PLOTLY and fig_gdd is not None:
         # 左右の余白を少し増やす
         fig_gdd.update_layout(margin=dict(l=10, r=30, t=10, b=10))
 if USE_PLOTLY:
-    st.plotly_chart(fig_gdd, use_container_width=True, config={"displayModeBar": False})
+    st.plotly_chart(fig_gdd, use_container_width=True, config=PLOTLY_CONFIG)
 else:
     st.line_chart(gdd_df.set_index(x_gdd)["累積GDD"])
 st.markdown('<div class="card-note">※ GDDは 04-01 以降を対象に、日GDD = max(0, 日平均気温 − Tb) を年ごとに累積しています。</div>', unsafe_allow_html=True)
