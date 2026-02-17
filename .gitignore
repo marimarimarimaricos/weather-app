@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.DS_Store
+weather_data.db
+.venv/
+venv/
+.env
+
+# credentials (DO NOT COMMIT)
+sheets-key.json
+sheets-key/
+sheets-key*.json
