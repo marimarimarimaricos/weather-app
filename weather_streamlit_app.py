@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 from pathlib import Path
+from streamlit_echarts import st_echarts
 
 from daily_average import get_daily_averages
 
@@ -288,166 +289,99 @@ if _sum_targets:
 # GDD（4/1固定）
 gdd_df = add_gdd_columns(daily_all, base_temp=base_temp)
 
-# Plotlyでカード内グラフ（未インストール時はフォールバック）
-try:
-    import plotly.graph_objects as go
-    USE_PLOTLY = True
-except ImportError:
-    USE_PLOTLY = False
+# ECharts（streamlit-echarts）
+USE_ECHARTS = True
 
-if USE_PLOTLY:
-    PLOTLY_CONFIG = {
-        "displayModeBar": True,
-        "displaylogo": False,
-        "scrollZoom": False,
-        "doubleClick": "reset"
-    }
-
-def _fig_line(dates, series: dict, height: int = 260):
-    if not USE_PLOTLY:
+def _echarts_line(dates, series: dict, height: int = 260):
+    if not USE_ECHARTS:
         return None
-    fig = go.Figure()
+
+    x = [pd.to_datetime(d).strftime("%m/%d").lstrip("0").replace("/0", "/") for d in dates]
+
+    echarts_series = []
     for name, y in series.items():
-        fig.add_trace(go.Scatter(x=dates, y=y, mode="lines", name=name))
-    fig.update_layout(
-        height=height,
-        margin=dict(l=10, r=10, t=10, b=10),
-        legend=dict(orientation="h", yanchor="top", y=-0.22, x=0),
-        plot_bgcolor="#ffffff",
-        paper_bgcolor="#ffffff",
-        font=dict(color="#111"),
-        dragmode="pan",
-    )
-    fig.update_xaxes(
-        showgrid=True,
-        gridcolor="rgba(0,0,0,0.08)",
-        tickformat="%m/%d",
-        tickfont=dict(color="#444", size=12),
-        title_font=dict(color="#444"),
-        fixedrange=True,
-    )
-    fig.update_yaxes(
-        showgrid=True,
-        gridcolor="rgba(0,0,0,0.08)",
-        tickfont=dict(color="#444", size=12),
-        title_font=dict(color="#444")
-    )
-    fig.update_yaxes(fixedrange=True)
-    return fig
+        echarts_series.append({
+            "name": name,
+            "type": "line",
+            "showSymbol": False,
+            "data": [None if pd.isna(v) else float(v) for v in y],
+        })
+
+    option = {
+        "tooltip": {"trigger": "axis"},
+        "legend": {"data": list(series.keys())},
+        "grid": {"left": 40, "right": 15, "top": 20, "bottom": 40},
+        "xAxis": {"type": "category", "data": x},
+        "yAxis": {"type": "value", "scale": False},
+        "series": echarts_series,
+    }
+    return option
 
 
-def _fig_bar(dates, y, height: int = 260, y_dtick: float | None = None, y_range: tuple[float, float] | None = None):
-    if not USE_PLOTLY:
+def _echarts_bar(dates, y, height: int = 260):
+    if not USE_ECHARTS:
         return None
-    fig = go.Figure()
-    fig.add_trace(go.Bar(x=dates, y=y, marker_color="#6ea8fe"))
-    fig.update_layout(
-        height=height,
-        margin=dict(l=10, r=10, t=10, b=10),
-        showlegend=False,
-        plot_bgcolor="#ffffff",
-        paper_bgcolor="#ffffff",
-        font=dict(color="#111"),
-        dragmode="pan",
-    )
-    fig.update_xaxes(
-        showgrid=True,
-        gridcolor="rgba(0,0,0,0.08)",
-        tickformat="%m/%d",
-        tickfont=dict(color="#444", size=12),
-        title_font=dict(color="#444"),
-        fixedrange=True,
-    )
-    y_kwargs = dict(showgrid=True, gridcolor="rgba(0,0,0,0.08)", fixedrange=True)
 
-    if y_dtick is not None:
-        y_kwargs["dtick"] = y_dtick
-        y_kwargs["tick0"] = 0
-    if y_range is not None:
-        y_kwargs["range"] = list(y_range)
-    y_kwargs.update({
-        "tickfont": dict(color="#444", size=12),
-        "title_font": dict(color="#444")
-    })
-    fig.update_yaxes(**y_kwargs)
-    return fig
-
+    x = [pd.to_datetime(d).strftime("%m/%d").lstrip("0").replace("/0", "/") for d in dates]
+    option = {
+        "tooltip": {"trigger": "axis"},
+        "grid": {"left": 40, "right": 15, "top": 20, "bottom": 40},
+        "xAxis": {"type": "category", "data": x},
+        "yAxis": {"type": "value", "min": 0},
+        "series": [{
+            "type": "bar",
+            "data": [None if pd.isna(v) else float(v) for v in y],
+        }],
+    }
+    return option
 
 x_all = pd.to_datetime(daily_all["日付"])
 
 # 気温
 st.markdown('<div class="card"><div class="card-title">気温の推移（最高・最低）</div>', unsafe_allow_html=True)
-fig_temp = _fig_line(
+opt_temp = _echarts_line(
     x_all,
     {
         "最高気温": daily_all["気温（最高）"],
         "最低気温": daily_all["気温（最低）"],
     },
 )
-if USE_PLOTLY:
-    st.plotly_chart(fig_temp, use_container_width=True, config=PLOTLY_CONFIG)
+if USE_ECHARTS:
+    st_echarts(options=opt_temp, height="260px")
 else:
     st.line_chart(daily_all.set_index(x_all)[["気温（最高）", "気温（最低）"]])
 st.markdown('</div>', unsafe_allow_html=True)
 
 # 日照
 st.markdown('<div class="card"><div class="card-title">日照時間（h/日）</div>', unsafe_allow_html=True)
-# 日照（h/日）は日合計で表示（0h,4h,8h...）
-_sun_col = "日照時間（日計)" if "日照時間（日計)" in daily_all.columns else ("日照時間（日計）" if "日照時間（日計）" in daily_all.columns else "日照時間（平均）")
-_sun_max = float(pd.to_numeric(daily_all[_sun_col], errors="coerce").max()) if _sun_col in daily_all.columns else 0.0
-_sun_top = (int((_sun_max + 3.999) // 4) * 4) if _sun_max > 0 else 16
-fig_sun = _fig_bar(x_all, daily_all[_sun_col], y_dtick=4, y_range=(0, max(4, _sun_top)))
-if USE_PLOTLY:
-    st.plotly_chart(fig_sun, use_container_width=True, config=PLOTLY_CONFIG)
+opt_sun = _echarts_bar(x_all, daily_all["日照時間"])
+if USE_ECHARTS:
+    st_echarts(options=opt_sun, height="260px")
 else:
-    # フォールバック（軸の細かい調整は不可）
-    st.bar_chart(daily_all.set_index(x_all)[_sun_col]) 
+    st.bar_chart(daily_all.set_index(x_all)["日照時間"])
 st.markdown('</div>', unsafe_allow_html=True)
 
 # 降水量
 st.markdown('<div class="card"><div class="card-title">降水量（mm/日）</div>', unsafe_allow_html=True)
 # 降水量（mm/日）も日合計で表示
-_rain_col = "降水量（日計)" if "降水量（日計)" in daily_all.columns else ("降水量（日計）" if "降水量（日計）" in daily_all.columns else "降水量（平均）")
-fig_rain = _fig_bar(x_all, daily_all[_rain_col])
-if USE_PLOTLY:
-    st.plotly_chart(fig_rain, use_container_width=True, config=PLOTLY_CONFIG)
+_rain_col = "降水量（日計）" if "降水量（日計）" in daily_all.columns else "降水量"
+opt_rain = _echarts_bar(x_all, daily_all[_rain_col])
+if USE_ECHARTS:
+    st_echarts(options=opt_rain, height="260px")
 else:
-    st.bar_chart(daily_all.set_index(x_all)[_rain_col]) 
+    st.bar_chart(daily_all.set_index(x_all)[_rain_col])
 st.markdown('</div>', unsafe_allow_html=True)
 
 # GDD
 st.markdown('<div class="card"><div class="card-title">GDD（有効積算温度）- 基準温度{:.1f}℃、4月1日〜</div>'.format(float(base_temp)), unsafe_allow_html=True)
 x_gdd = pd.to_datetime(gdd_df["日付"])
-fig_gdd = _fig_line(x_gdd, {"累積GDD": gdd_df["累積GDD"]})
+opt_gdd = _echarts_line(x_gdd, {"累積GDD": gdd_df["累積GDD"]})
 
-# ステージ表示（右軸＋横線）
-if USE_PLOTLY and fig_gdd is not None:
-    # stage_inputs は詳細設定で作られている（空なら表示しない）
-    stage_vals = []
-    stage_texts = []
-    for name, val in sorted(stage_inputs.items(), key=lambda kv: kv[1], reverse=True):
-        stage_vals.append(val)
-        stage_texts.append(name)
-        fig_gdd.add_hline(y=val, line_width=1, line_dash="dot", line_color="rgba(0,0,0,0.25)")
-
-    if stage_vals:
-        fig_gdd.update_layout(
-            yaxis2=dict(
-                overlaying="y",
-                side="right",
-                tickmode="array",
-                tickvals=stage_vals,
-                ticktext=stage_texts,
-                showgrid=False,
-                zeroline=False,
-            )
-        )
-        # 左右の余白を少し増やす
-        fig_gdd.update_layout(margin=dict(l=10, r=30, t=10, b=10))
-if USE_PLOTLY:
-    st.plotly_chart(fig_gdd, use_container_width=True, config=PLOTLY_CONFIG)
+if USE_ECHARTS:
+    st_echarts(options=opt_gdd, height="260px")
 else:
     st.line_chart(gdd_df.set_index(x_gdd)["累積GDD"])
+
 st.markdown('<div class="card-note">※ GDDは 04-01 以降を対象に、日GDD = max(0, 日平均気温 − Tb) を年ごとに累積しています。</div>', unsafe_allow_html=True)
 st.markdown('</div>', unsafe_allow_html=True)
 
@@ -483,7 +417,7 @@ if not gdd_df.empty:
     m1, m2, m3 = st.columns(3)
     # 日付表示を 12/31 形式に
     _d = pd.to_datetime(last_row["日付"], errors="coerce")
-    d_label = _d.strftime("%-m/%-d") if pd.notna(_d) else str(last_row["日付"])
+    d_label = _d.strftime("%m/%d").lstrip("0").replace("/0", "/") if pd.notna(_d) else str(last_row["日付"])
     with m1:
         st.markdown(
             f"""
