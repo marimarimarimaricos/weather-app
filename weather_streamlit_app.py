@@ -200,8 +200,13 @@ st.markdown('<div class="section-title">統計</div>', unsafe_allow_html=True)
 
 gdd_year = int(st.selectbox("年", year_list, index=default_year_index, key="year_select"))
 
+# ▼追加：前年表示トグル（年選択の直下）
+show_prev = st.toggle("前年データを重ねて表示", value=False, key="toggle_prev")
+prev_year = gdd_year - 1
+
 # 選んだ年の「その年に存在する最新月」まで表示（2025が途中でもOK）
-latest_month_for_year = int(df[df["日付_dt"].dt.year == gdd_year]["日付_dt"].dt.month.max())
+mmax = df.loc[df["日付_dt"].dt.year == gdd_year, "日付_dt"].dt.month.max()
+latest_month_for_year = int(mmax) if pd.notna(mmax) else 12
 
 gdd_upto_month = latest_month_for_year
 gdd_start_hour, gdd_end_hour = 0, 23
@@ -234,6 +239,46 @@ if _sum_targets:
     if rename_map:
         daily_sum = daily_sum.rename(columns=rename_map)
         daily_all = daily_all.merge(daily_sum[["日付"] + list(rename_map.values())], on="日付", how="left")
+
+# --- 前年比トグルがオンのとき ---
+
+prev_daily_all = None
+prev_end_dt = None
+
+if show_prev and (prev_year in year_list):
+    prev_end_dt = pd.Timestamp(prev_year, end_dt.month, end_dt.day)
+
+    prev_year_df_all = filter_by_time_window(
+        df, prev_year, None, int(gdd_start_hour), int(gdd_end_hour)
+    )
+    prev_year_df_all = prev_year_df_all[prev_year_df_all["日付_dt"] <= prev_end_dt].copy()
+    prev_year_df_all["日付"] = prev_year_df_all["日付_dt"].dt.strftime("%Y-%m-%d")
+
+    prev_daily_all = get_daily_averages(prev_year_df_all)
+
+    _sum_targets_prev = {}
+    if "日照時間" in prev_year_df_all.columns:
+        _sum_targets_prev["日照時間"] = "sum"
+    if "降水量" in prev_year_df_all.columns:
+        _sum_targets_prev["降水量"] = "sum"
+
+    if _sum_targets_prev:
+        prev_daily_sum = prev_year_df_all.groupby("日付").agg(_sum_targets_prev).reset_index()
+
+        prev_rename_map = {}
+        if "日照時間" in prev_daily_sum.columns:
+            prev_rename_map["日照時間"] = "日照時間（日計）"
+        if "降水量" in prev_daily_sum.columns:
+            prev_rename_map["降水量"] = "降水量（日計）"
+
+        if prev_rename_map:
+            prev_daily_sum = prev_daily_sum.rename(columns=prev_rename_map)
+
+            prev_daily_all = prev_daily_all.merge(
+                prev_daily_sum[["日付"] + list(prev_rename_map.values())],
+                on="日付",
+                how="left"
+            )
 
 # --- GDDは4/1以降だけ ---
 start_dt = pd.Timestamp(year=int(gdd_year), month=4, day=1)
@@ -293,17 +338,59 @@ def _echarts_bar(dates, y, height: int = 260):
     }
     return option
 
+def _echarts_bar_multi(dates, series: dict, height: int = 260):
+    if not USE_ECHARTS:
+        return None
+
+    x = [pd.to_datetime(d).strftime("%m/%d").lstrip("0").replace("/0", "/") for d in dates]
+
+    echarts_series = []
+    for name, y in series.items():
+        echarts_series.append({
+            "name": name,
+            "type": "bar",
+            "data": [None if pd.isna(v) else float(v) for v in y],
+        })
+
+    option = {
+        "tooltip": {"trigger": "axis"},
+        "legend": {"data": list(series.keys())},
+        "grid": {"left": 40, "right": 15, "top": 20, "bottom": 40},
+        "xAxis": {"type": "category", "data": x},
+        "yAxis": {"type": "value", "min": 0},
+        "series": echarts_series,
+    }
+    return option
+
+def _align_prev_to_x(x_all, prev_df: pd.DataFrame, col: str):
+    """今年x_allに対して、前年prev_dfのcolをMM-DDで揃えて返す（欠損はNone）"""
+    if prev_df is None or prev_df.empty or (col not in prev_df.columns):
+        return None
+
+    x_keys = pd.to_datetime(x_all).dt.strftime("%m-%d")
+    prev_keys = pd.to_datetime(prev_df["日付"], errors="coerce").dt.strftime("%m-%d")
+
+    m = dict(zip(prev_keys, prev_df[col]))
+    return [m.get(k) for k in x_keys]
+
 x_all = pd.to_datetime(daily_all["日付"])
 
 # 気温
 st.markdown('<div class="card"><div class="card-title">気温の推移（最高・最低）</div>', unsafe_allow_html=True)
-opt_temp = _echarts_line(
-    x_all,
-    {
-        "最高気温": daily_all["気温（最高）"],
-        "最低気温": daily_all["気温（最低）"],
-    },
-)
+temp_series = {
+    f"最高気温（{gdd_year}）": daily_all["気温（最高）"],
+    f"最低気温（{gdd_year}）": daily_all["気温（最低）"],
+}
+
+if show_prev and (prev_daily_all is not None):
+    y_prev_max = _align_prev_to_x(x_all, prev_daily_all, "気温（最高）")
+    y_prev_min = _align_prev_to_x(x_all, prev_daily_all, "気温（最低）")
+    if y_prev_max is not None:
+        temp_series[f"最高気温（{prev_year}）"] = y_prev_max
+    if y_prev_min is not None:
+        temp_series[f"最低気温（{prev_year}）"] = y_prev_min
+
+opt_temp = _echarts_line(x_all, temp_series)
 if USE_ECHARTS:
     st_echarts(options=opt_temp, height="260px")
 else:
@@ -313,7 +400,15 @@ st.markdown('</div>', unsafe_allow_html=True)
 # 日照
 st.markdown('<div class="card"><div class="card-title">日照時間（h/日）</div>', unsafe_allow_html=True)
 sun_col = "日照時間（日計）" if "日照時間（日計）" in daily_all.columns else "日照時間"
-opt_sun = _echarts_bar(x_all, daily_all[sun_col])
+
+sun_series = {f"日照（{gdd_year}）": daily_all[sun_col]}
+if show_prev and (prev_daily_all is not None):
+    y_prev_sun = _align_prev_to_x(x_all, prev_daily_all, sun_col)
+    if y_prev_sun is not None:
+        sun_series[f"日照（{prev_year}）"] = y_prev_sun
+
+opt_sun = _echarts_bar_multi(x_all, sun_series)
+
 if USE_ECHARTS:
     st_echarts(options=opt_sun, height="260px")
 else:
@@ -324,11 +419,19 @@ st.markdown('</div>', unsafe_allow_html=True)
 st.markdown('<div class="card"><div class="card-title">降水量（mm/日）</div>', unsafe_allow_html=True)
 # 降水量（mm/日）も日合計で表示
 rain_col = "降水量（日計）" if "降水量（日計）" in daily_all.columns else "降水量"
-opt_rain = _echarts_bar(x_all, daily_all[rain_col])
+
+rain_series = {f"降水（{gdd_year}）": daily_all[rain_col]}
+if show_prev and (prev_daily_all is not None):
+    y_prev_rain = _align_prev_to_x(x_all, prev_daily_all, rain_col)
+    if y_prev_rain is not None:
+        rain_series[f"降水（{prev_year}）"] = y_prev_rain
+
+opt_rain = _echarts_bar_multi(x_all, rain_series)
+
 if USE_ECHARTS:
     st_echarts(options=opt_rain, height="260px")
 else:
-    st.bar_chart(daily_all.set_index(x_all)[_rain_col])
+    st.bar_chart(daily_all.set_index(x_all)[rain_col])
 st.markdown('</div>', unsafe_allow_html=True)
 
 # GDD
@@ -337,7 +440,19 @@ st.markdown('<div class="card"><div class="card-title">GDD（有効積算温度�
 if show_gdd:
     gdd_df = add_gdd_columns(daily_all, base_temp=base_temp)
     x_gdd = pd.to_datetime(gdd_df["日付"])
-    opt_gdd = _echarts_line(x_gdd, {"累積GDD": gdd_df["累積GDD"]})
+
+    gdd_series = {f"累積GDD（{gdd_year}）": gdd_df["累積GDD"]}
+
+    if show_prev and (prev_daily_all is not None):
+        prev_gdd_df = add_gdd_columns(prev_daily_all, base_temp=base_temp)
+        # x_gdd にMM-DDで揃える
+        x_keys = pd.to_datetime(x_gdd).dt.strftime("%m-%d")
+        prev_keys = pd.to_datetime(prev_gdd_df["日付"]).dt.strftime("%m-%d")
+        prev_map = dict(zip(prev_keys, prev_gdd_df["累積GDD"]))
+        prev_aligned = [prev_map.get(k) for k in x_keys]
+        gdd_series[f"累積GDD（{prev_year}）"] = prev_aligned
+
+    opt_gdd = _echarts_line(x_gdd, gdd_series)
     if USE_ECHARTS:
         st_echarts(options=opt_gdd, height="260px")
     else:
@@ -347,6 +462,8 @@ else:
 
 st.markdown('<div class="card-note">※ GDDは 04-01 以降を対象に、日GDD = max(0, 日平均気温 − Tb) を年ごとに累積しています。</div>', unsafe_allow_html=True)
 st.markdown('</div>', unsafe_allow_html=True)
+
+
 
 # 追加ミニカード：最高/最低（理想アプリ寄せ）
 if not daily_all.empty and ("気温（最高）" in daily_all.columns) and ("気温（最低）" in daily_all.columns):
