@@ -83,7 +83,7 @@ latest_month = int(latest_date.month)
 # 年リスト（UIで使用）
 year_list = sorted(df["日付_dt"].dt.year.dropna().unique())
 if not year_list:
-    st.error("DBにデータがありません")
+    st.error("CSVにデータがありません")
     st.stop()
 
 default_year_index = year_list.index(latest_year) if latest_year in year_list else len(year_list) - 1
@@ -257,7 +257,7 @@ end_dt = last_day_of_month(int(gdd_year), int(gdd_upto_month))
 year_df = year_df[(year_df["日付_dt"] >= start_dt) & (year_df["日付_dt"] <= end_dt)].copy()
 
 if year_df.empty:
-    st.warning("この期間のデータがありません（DBに4/1以降のデータが入っているか確認してね）")
+    st.warning("この期間のデータがありません（CSVに4/1以降のデータが入っているか確認してね）")
     st.stop()
 
 # 日別集計のために日付文字列を用意
