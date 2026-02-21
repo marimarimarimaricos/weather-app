@@ -189,7 +189,7 @@ st.markdown(
     <div class="app-header">
       <div class="header-inner">
         <div class="hamburger">☰</div>
-        <div class="title">🍇 ワイン葡萄栽培日記</div>
+        <div class="title">🍇韮崎アメダスビューア</div>
       </div>
     </div>
     """,
@@ -201,93 +201,75 @@ st.markdown('<div class="section-title">統計</div>', unsafe_allow_html=True)
 # 年のみ（区画は一旦削除）
 gdd_year = st.selectbox("年", year_list, index=default_year_index)
 
-with st.expander("詳細設定", expanded=False):
-    month_list = list(range(1, 13))
-    default_m = latest_month if int(gdd_year) == latest_year else 12
-    gdd_upto_month = st.selectbox("どこまで表示する？（月末まで）", month_list, index=month_list.index(default_m))
+# GDDの設定（詳細設定UIを廃止したので固定/自動）
+gdd_year = latest_year
+gdd_upto_month = latest_month
+gdd_start_hour, gdd_end_hour = 0, 23
+base_temp = float(BASE_TEMP_DEFAULT)
 
-    hours = list(range(0, 24))
-    c1, c2, c3 = st.columns([1, 1, 1])
-    with c1:
-        gdd_start_hour = st.selectbox("開始時刻", hours, index=0, key="gdd_start")
-    with c2:
-        gdd_end_hour = st.selectbox("終了時刻", hours, index=23, key="gdd_end")
-    with c3:
-        base_temp = st.number_input("基準温度Tb（℃）", min_value=-5.0, max_value=20.0, value=float(BASE_TEMP_DEFAULT), step=0.5)
-
-    st.markdown("---")
-    st.markdown("**GDDステージ（右軸表示用）**  ※数値が空なら表示しません")
-    STAGE_ORDER = [
-        "収穫",
-        "成熟期",
-        "ヴェレゾン",
-        "果粒肥大",
-        "結実",
-        "満開",
-        "開花開始",
-        "展葉期",
-        "萌芽",
-    ]
-    stage_inputs = {}
-    cols_stage = st.columns(3)
-    for i, name in enumerate(STAGE_ORDER):
-        with cols_stage[i % 3]:
-            s = st.text_input(f"{name}（GDD）", value="", key=f"stage_{name}")
-            s = s.strip()
-            if s:
-                try:
-                    stage_inputs[name] = float(s)
-                except ValueError:
-                    st.caption("数字で入力してね")
-    # stage_inputs: dict[str, float]
-
-
-# expanderを開かない場合のデフォルト
-if "gdd_upto_month" not in locals():
-    gdd_upto_month = latest_month if int(gdd_year) == latest_year else 12
-if "gdd_start_hour" not in locals():
-    gdd_start_hour, gdd_end_hour = 0, 23
-if "base_temp" not in locals():
-    base_temp = float(BASE_TEMP_DEFAULT)
-
-# 年の4/1〜選択月末までのデータを取得
-year_df = filter_by_time_window(df, int(gdd_year), None, int(gdd_start_hour), int(gdd_end_hour))
-start_dt = pd.Timestamp(year=int(gdd_year), month=4, day=1)
+# 年のデータを取得（時間帯はここで適用）
+year_df_all = filter_by_time_window(df, int(gdd_year), None, int(gdd_start_hour), int(gdd_end_hour))
 end_dt = last_day_of_month(int(gdd_year), int(gdd_upto_month))
-year_df = year_df[(year_df["日付_dt"] >= start_dt) & (year_df["日付_dt"] <= end_dt)].copy()
+year_df_all = year_df_all[year_df_all["日付_dt"] <= end_dt].copy()
 
-if year_df.empty:
-    st.warning("この期間のデータがありません（CSVに4/1以降のデータが入っているか確認してね）")
-    st.stop()
+# 気象データ（日別集計）は「年全体」で作る
+year_df_all["日付"] = year_df_all["日付_dt"].dt.strftime("%Y-%m-%d")
+daily_all = get_daily_averages(year_df_all)
+
+# 日照時間・降水量（日計）をmerge（ここも年全体でOK）
+_sum_targets = {}
+if "日照時間" in year_df_all.columns:
+    _sum_targets["日照時間"] = "sum"
+if "降水量" in year_df_all.columns:
+    _sum_targets["降水量"] = "sum"
+
+if _sum_targets:
+    daily_sum = year_df_all.groupby("日付").agg(_sum_targets).reset_index()
+    rename_map = {}
+    if "日照時間" in daily_sum.columns:
+        rename_map["日照時間"] = "日照時間（日計）"
+    if "降水量" in daily_sum.columns:
+        rename_map["降水量"] = "降水量（日計）"
+    if rename_map:
+        daily_sum = daily_sum.rename(columns=rename_map)
+        daily_all = daily_all.merge(daily_sum[["日付"] + list(rename_map.values())], on="日付", how="left")
+
+# --- GDDは4/1以降だけ ---
+start_dt = pd.Timestamp(year=int(gdd_year), month=4, day=1)
+year_df_gdd = year_df_all[year_df_all["日付_dt"] >= start_dt].copy()
+
+show_gdd = not year_df_gdd.empty
 
 # 日別集計のために日付文字列を用意
-year_df["日付"] = year_df["日付_dt"].dt.strftime("%Y-%m-%d")
-daily_all = get_daily_averages(year_df)
+year_df_all["日付"] = year_df_all["日付_dt"].dt.strftime("%Y-%m-%d")
+daily_all = get_daily_averages(year_df_all)
 
 # 日照時間・降水量は「日合計」の方がアプリ表示として自然なので、元データから日合計を作って差し替える
 _sum_targets = {}
-if "日照時間" in year_df.columns:
+if "日照時間" in year_df_all.columns:
     _sum_targets["日照時間"] = "sum"
-if "降水量" in year_df.columns:
+if "降水量" in year_df_all.columns:
     _sum_targets["降水量"] = "sum"
 if _sum_targets:
-    daily_sum = year_df.groupby("日付").agg(_sum_targets).reset_index()
-    # 日照時間
+    daily_sum = year_df_all.groupby("日付").agg(_sum_targets).reset_index()
+
+    # 日計は「平均」と混ざらないように列名を分けてから merge
+    rename_map = {}
     if "日照時間" in daily_sum.columns:
-        daily_all = daily_all.merge(daily_sum[["日付", "日照時間"]], on="日付", how="left", suffixes=("", "_sum"))
-        daily_all["日照時間（日計）"] = daily_all["日照時間"]
-    # 降水量
+        rename_map["日照時間"] = "日照時間（日計）"
     if "降水量" in daily_sum.columns:
-        # merge済みの場合に備え再度mergeはしない（列がないならmerge）
-        if "降水量" not in daily_all.columns or daily_all["降水量"].isna().all():
-            daily_all = daily_all.merge(daily_sum[["日付", "降水量"]], on="日付", how="left")
-        daily_all["降水量（日計）"] = daily_all["降水量"]
+        rename_map["降水量"] = "降水量（日計）"
+
+    if rename_map:
+        daily_sum = daily_sum.rename(columns=rename_map)
+        daily_all = daily_all.merge(daily_sum[["日付"] + list(rename_map.values())], on="日付", how="left")
 
 # X軸用（12/1形式に統一）
 # x_all は上で作成済み
 
-# GDD（4/1固定）
-gdd_df = add_gdd_columns(daily_all, base_temp=base_temp)
+if show_gdd:
+    # GDD（4/1固定）
+    gdd_df = add_gdd_columns(daily_all, base_temp=base_temp)
 
 # ECharts（streamlit-echarts）
 USE_ECHARTS = True
@@ -354,7 +336,8 @@ st.markdown('</div>', unsafe_allow_html=True)
 
 # 日照
 st.markdown('<div class="card"><div class="card-title">日照時間（h/日）</div>', unsafe_allow_html=True)
-opt_sun = _echarts_bar(x_all, daily_all["日照時間"])
+sun_col = "日照時間（日計）" if "日照時間（日計）" in daily_all.columns else "日照時間"
+opt_sun = _echarts_bar(x_all, daily_all[sun_col])
 if USE_ECHARTS:
     st_echarts(options=opt_sun, height="260px")
 else:
@@ -364,8 +347,8 @@ st.markdown('</div>', unsafe_allow_html=True)
 # 降水量
 st.markdown('<div class="card"><div class="card-title">降水量（mm/日）</div>', unsafe_allow_html=True)
 # 降水量（mm/日）も日合計で表示
-_rain_col = "降水量（日計）" if "降水量（日計）" in daily_all.columns else "降水量"
-opt_rain = _echarts_bar(x_all, daily_all[_rain_col])
+rain_col = "降水量（日計）" if "降水量（日計）" in daily_all.columns else "降水量"
+opt_rain = _echarts_bar(x_all, daily_all[rain_col])
 if USE_ECHARTS:
     st_echarts(options=opt_rain, height="260px")
 else:
@@ -374,13 +357,17 @@ st.markdown('</div>', unsafe_allow_html=True)
 
 # GDD
 st.markdown('<div class="card"><div class="card-title">GDD（有効積算温度）- 基準温度{:.1f}℃、4月1日〜</div>'.format(float(base_temp)), unsafe_allow_html=True)
-x_gdd = pd.to_datetime(gdd_df["日付"])
-opt_gdd = _echarts_line(x_gdd, {"累積GDD": gdd_df["累積GDD"]})
 
-if USE_ECHARTS:
-    st_echarts(options=opt_gdd, height="260px")
+if show_gdd:
+    gdd_df = add_gdd_columns(daily_all, base_temp=base_temp)
+    x_gdd = pd.to_datetime(gdd_df["日付"])
+    opt_gdd = _echarts_line(x_gdd, {"累積GDD": gdd_df["累積GDD"]})
+    if USE_ECHARTS:
+        st_echarts(options=opt_gdd, height="260px")
+    else:
+        st.line_chart(gdd_df.set_index(x_gdd)["累積GDD"])
 else:
-    st.line_chart(gdd_df.set_index(x_gdd)["累積GDD"])
+    st.caption("GDDは4/1以降のデータが入ると自動で表示されます。")
 
 st.markdown('<div class="card-note">※ GDDは 04-01 以降を対象に、日GDD = max(0, 日平均気温 − Tb) を年ごとに累積しています。</div>', unsafe_allow_html=True)
 st.markdown('</div>', unsafe_allow_html=True)
@@ -412,7 +399,7 @@ if not daily_all.empty and ("気温（最高）" in daily_all.columns) and ("気
         )
 
 # ミニカード：日付/当日GDD/累積GDD
-if not gdd_df.empty:
+if show_gdd and (not gdd_df.empty):
     last_row = gdd_df.iloc[-1]
     m1, m2, m3 = st.columns(3)
     # 日付表示を 12/31 形式に
