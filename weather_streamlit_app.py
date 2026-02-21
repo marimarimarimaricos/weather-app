@@ -198,14 +198,15 @@ st.markdown(
 
 st.markdown('<div class="section-title">統計</div>', unsafe_allow_html=True)
 
-# 年のみ（区画は一旦削除）
-gdd_year = st.selectbox("年", year_list, index=default_year_index)
+gdd_year = int(st.selectbox("年", year_list, index=default_year_index, key="year_select"))
 
-# GDDの設定（詳細設定UIを廃止したので固定/自動）
-gdd_year = latest_year
-gdd_upto_month = latest_month
+# 選んだ年の「その年に存在する最新月」まで表示（2025が途中でもOK）
+latest_month_for_year = int(df[df["日付_dt"].dt.year == gdd_year]["日付_dt"].dt.month.max())
+
+gdd_upto_month = latest_month_for_year
 gdd_start_hour, gdd_end_hour = 0, 23
 base_temp = float(BASE_TEMP_DEFAULT)
+
 
 # 年のデータを取得（時間帯はここで適用）
 year_df_all = filter_by_time_window(df, int(gdd_year), None, int(gdd_start_hour), int(gdd_end_hour))
@@ -240,32 +241,7 @@ year_df_gdd = year_df_all[year_df_all["日付_dt"] >= start_dt].copy()
 
 show_gdd = not year_df_gdd.empty
 
-# 日別集計のために日付文字列を用意
-year_df_all["日付"] = year_df_all["日付_dt"].dt.strftime("%Y-%m-%d")
-daily_all = get_daily_averages(year_df_all)
-
-# 日照時間・降水量は「日合計」の方がアプリ表示として自然なので、元データから日合計を作って差し替える
-_sum_targets = {}
-if "日照時間" in year_df_all.columns:
-    _sum_targets["日照時間"] = "sum"
-if "降水量" in year_df_all.columns:
-    _sum_targets["降水量"] = "sum"
-if _sum_targets:
-    daily_sum = year_df_all.groupby("日付").agg(_sum_targets).reset_index()
-
-    # 日計は「平均」と混ざらないように列名を分けてから merge
-    rename_map = {}
-    if "日照時間" in daily_sum.columns:
-        rename_map["日照時間"] = "日照時間（日計）"
-    if "降水量" in daily_sum.columns:
-        rename_map["降水量"] = "降水量（日計）"
-
-    if rename_map:
-        daily_sum = daily_sum.rename(columns=rename_map)
-        daily_all = daily_all.merge(daily_sum[["日付"] + list(rename_map.values())], on="日付", how="left")
-
 # X軸用（12/1形式に統一）
-# x_all は上で作成済み
 
 if show_gdd:
     # GDD（4/1固定）
