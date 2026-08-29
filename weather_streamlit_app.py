@@ -158,11 +158,6 @@ html, body, [data-testid="stAppViewContainer"], [data-testid="stApp"] {
   margin-bottom: 0.6rem;
 }
 .header-inner{display:flex; align-items:center; gap:0.6rem;}
-.hamburger{
-  font-size: 1.2rem; line-height: 1; color:#111;
-  padding: 0.15rem 0.5rem; border-radius: 10px;
-  border: 1px solid rgba(0,0,0,0.12);
-}
 .title{font-weight: 800; font-size: 1.05rem; color:#111;}
 
 .section-title{font-size: 1.9rem; font-weight: 900; margin: 0.1rem 0 0.4rem; color:#111;}
@@ -188,9 +183,7 @@ st.markdown(
     """
     <div class="app-header">
       <div class="header-inner">
-        <div class="hamburger">☰</div>
         <div class="title">🍇韮崎アメダスビューア</div>
-      </div>
     </div>
     """,
     unsafe_allow_html=True,
@@ -312,8 +305,8 @@ def _echarts_line(dates, series: dict, height: int = 260):
 
     option = {
         "tooltip": {"trigger": "axis"},
-        "legend": {"data": list(series.keys())},
-        "grid": {"left": 40, "right": 15, "top": 20, "bottom": 40},
+        "legend": {"data": list(series.keys()), "top": 0},
+        "grid": {"left": 40, "right": 15, "top": 40, "bottom": 40},
         "xAxis": {"type": "category", "data": x},
         "yAxis": {"type": "value", "scale": False},
         "series": echarts_series,
@@ -354,8 +347,8 @@ def _echarts_bar_multi(dates, series: dict, height: int = 260):
 
     option = {
         "tooltip": {"trigger": "axis"},
-        "legend": {"data": list(series.keys())},
-        "grid": {"left": 40, "right": 15, "top": 20, "bottom": 40},
+        "legend": {"data": list(series.keys()), "top": 0},
+        "grid": {"left": 40, "right": 15, "top": 40, "bottom": 40},
         "xAxis": {"type": "category", "data": x},
         "yAxis": {"type": "value", "min": 0},
         "series": echarts_series,

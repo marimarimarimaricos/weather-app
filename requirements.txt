@@ -4,3 +4,4 @@ streamlit-echarts
 lxml
 html5lib
 requests
+supabase
